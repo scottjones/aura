@@ -404,7 +404,7 @@ const char *smp_s2r_why(void)
     return smp_s2r_why_buf[0] ? smp_s2r_why_buf : "RVBAR does not return here";
 }
 
-static bool smp_point_rvbar_here(void)
+static __attribute__((unused)) bool smp_point_rvbar_here(void)
 {
     u64 target = (u64)_vectors_start;
 
@@ -439,15 +439,21 @@ static bool smp_point_rvbar_here(void)
  * Whether a reset brings the cores back into this image. From M4 on (A18 Pro too), iBoot locks
  * every core's RVBAR to the same address, the boot core's too, and smp_prepare_rvbar() checked a
  * running secondary's before starting it. An OS started on the boot core alone suspends with that
- * core only, so it gets the same check and relay. On A7 to M3 RVBAR isn't locked: the OS can point
- * it anywhere, so it is pointed here.
+ * core only, so it gets the same check and relay. On A7 to M3 RVBAR isn't locked, and this image
+ * leaves it alone there (see below).
  */
 bool smp_resets_return_here(void)
 {
     if (boot_cpu_idx < 0)
         return false;
-    if (cpu_features->apple_sysregs_unlocked)
-        return smp_point_rvbar_here();
+    /*
+     * A7 to M3: no RVBAR writes and no S2R mailbox. On T8122 (M3) the boot core's store to its
+     * own RVBAR in smp_point_rvbar_here() takes an SError, and the boot loops.
+     */
+    if (cpu_features->apple_sysregs_unlocked) {
+        snprintf(smp_s2r_why_buf, sizeof(smp_s2r_why_buf), "RVBAR is not locked (A7 to M3)");
+        return false;
+    }
     int i;
     for (i = 0; i < MAX_CPUS; i++)
         if (i != boot_cpu_idx && cpu_info[i].valid && smp_is_alive(i))
